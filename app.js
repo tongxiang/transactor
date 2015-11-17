@@ -24,7 +24,8 @@ var Q = require('q')
   , stringify = require('csv-stringify')
   ;
 
-var readAndParseFile = function() {
+// 1) Reads in CSV text file. 
+var readFile = function() {
   var deferred = Q.defer();
   var userCSVFilePath = process.argv[2];
   fs.readFile(userCSVFilePath, 'utf8', function(error, text) {
@@ -38,6 +39,7 @@ var readAndParseFile = function() {
   return deferred.promise;
 }
 
+// 2) Parses file into CSV format. 
 var parseFile = function(rawText) {
   var deferred = Q.defer();
   parse(rawText, null, function(error, output) {
@@ -53,11 +55,15 @@ var parseFile = function(rawText) {
   return deferred.promise;
 }
 
+// 3. Uses async's queue function to run the findProject 
+// and submitDonation functions in series for each user
+// row in the CSV file. 
 var makeDonations = function(parsedCSVFile) {
   var errorArray = [];
   var q = async.queue(function (task, callback) {
    findProject(function(error, output) {
     var userCSVRow = [task.phoneNumber, task.userEmail, task.userName];
+      // If findProject throws an error, call the callback
       if (error) {
         callback(error, userCSVRow);
       }
@@ -67,19 +73,20 @@ var makeDonations = function(parsedCSVFile) {
     })
   }, 1);
 
-
-
   for (var i = 0; i < parsedCSVFile.length; i++) {
     var userObject = {
       phoneNumber: parsedCSVFile[i][0],
       userName : parsedCSVFile[i][2],
       userEmail : parsedCSVFile[i][1]
     }
+    // Defines the task and error callback: https://github.com/caolan/async#queue
+    // If error, add user row into error tracking CSV
     q.push(userObject, function(err, userData) {
       errorArray.push(userData);
     })
   }
 
+  // Run when the queue is clear. 
   q.drain = function() {
     console.log('All transactions have been processed.');
     console.log('errorArray: ', JSON.stringify(errorArray));
@@ -94,10 +101,7 @@ var makeDonations = function(parsedCSVFile) {
   } 
 }
 
-/**
- * Finds a project. Takes a callback with two params: error and projectId.
- *
- */
+// 4) Finds a project. Takes a callback with two params: error and projectId.
 var findProject = function(callback) {
   // Subject code for all 'Math & Science' subjects.
   var subjectFilter = 'subject4=-4'; 
@@ -159,14 +163,7 @@ var findProject = function(callback) {
   });
 }
 
-/**
- * Submits a donation transaction to Donors Choose.
- *
- * @param apiInfoObject = {apiUrl: string, apiPassword: string, apiKey: string}
- * @param donorInfoObject = {donorEmail: string, donorFirstName: string}
- * @param proposalId, the DonorsChoose proposal ID 
- *
- */
+// 5) Submits a donation transaction to Donors Choose.
 var submitDonation = function(userPhone, userEmail, userName, proposalId, callback) {
   var donorPhone = '***'
   var userCSVRow = [userPhone, userEmail, userName];
@@ -267,4 +264,4 @@ var submitDonation = function(userPhone, userEmail, userName, proposalId, callba
   }
 };
 
-readAndParseFile().then(parseFile).then(makeDonations);
+readFile().then(parseFile).then(makeDonations);
