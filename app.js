@@ -14,8 +14,7 @@ var TYPE_OF_LOCATION_WE_ARE_QUERYING_FOR = 'zip' // 'zip' or 'state'. Our retrie
   , DONATION_AMOUNT = 10
   , COST_TO_COMPLETE_UPPER_LIMIT = 10000
   , DONATE_API_URL = donorsChooseDonationBaseURL + donorsChooseApiKey
-  , PROJECT_CREATION_CUTOFF_DATE = 1445299201000 // October 20th, 2-15 12:00:01 AM GMT
-  , END_MESSAGE_DELAY = 2500;
+  ;
 
 var Q = require('q')
   , requestHttp = require('request')
@@ -73,8 +72,8 @@ var makeDonations = function(parsedCSVFile) {
   for (var i = 0; i < parsedCSVFile.length; i++) {
     var userObject = {
       phoneNumber: parsedCSVFile[i][0],
-      userName : parsedCSVFile[i][1],
-      userEmail : parsedCSVFile[i][2]
+      userName : parsedCSVFile[i][2],
+      userEmail : parsedCSVFile[i][1]
     }
     q.push(userObject, function(err, userData) {
       errorArray.push(userData);
@@ -106,10 +105,9 @@ var findProject = function(callback) {
   var urgencySort = 'sortBy=0'; 
   // Constrains results which fall within a specific 'costToComplete' value range. 
   var costToCompleteRange = 'costToCompleteRange=' + DONATION_AMOUNT + '+TO+' + COST_TO_COMPLETE_UPPER_LIMIT; 
-  var projectsCreatedBy = 'olderThan=' + PROJECT_CREATION_CUTOFF_DATE;
   // Maximum number of results to return. 
-  var maxNumberOfResults = '1';
-  var filterParams = subjectFilter + '&' + urgencySort + '&' + costToCompleteRange + '&' + projectsCreatedBy + '&';
+  var maxNumberOfResults = '20';
+  var filterParams = subjectFilter + '&' + urgencySort + '&' + costToCompleteRange + '&';
   var requestUrlString = donorsChooseProposalsQueryBaseURL + filterParams + 'APIKey=' + donorsChooseApiKey + '&max=' + maxNumberOfResults;
 
   requestHttp.get(requestUrlString, function(error, response, data) {
@@ -121,7 +119,18 @@ var findProject = function(callback) {
           throw new Error('No proposals returned from Donors Choose');
         }
         else {
-          var selectedProposal = donorsChooseResponse.proposals[0];
+          function getRandomIntInclusive(min, max) {
+            return Math.floor(Math.random() * (max - min + 1)) + min;
+          }
+          var selectedProposal;
+          var startInt = getRandomIntInclusive(0, maxNumberOfResults);
+          for (var i = startInt; i < donorsChooseResponse.proposals.length; i++) {
+            var proposal = donorsChooseResponse.proposals[i];
+            if (parseFloat(proposal.costToComplete) > DONATION_AMOUNT) {
+              selectedProposal = proposal;
+              break;
+            }
+          }
         }    
       }
       catch (e) {
@@ -181,12 +190,11 @@ var submitDonation = function(userPhone, userEmail, userName, proposalId, callba
       'apipassword': donorsChooseApiPassword, 
       'action': 'token'
     }}
-    requestHttp.post(donorsChooseDonationBaseURL, retrieveTokenParams, function(err, response, body) {
+    requestHttp.post(DONATE_API_URL, retrieveTokenParams, function(err, response, body) {
       if (!err) {
         try {
           var jsonBody = JSON.parse(body);
           if (jsonBody.statusDescription == 'success') {
-            console.log('debug', 'Request for token returned body:' + jsonBody);
             deferred.resolve(JSON.parse(body).token);
           } else {
             deferred.reject('Unable to retrieve a donation token from the DonorsChoose API for user mobile:' 
@@ -223,15 +231,14 @@ var submitDonation = function(userPhone, userEmail, userName, proposalId, callba
     }};
 
     console.log('Submitting donation with params:', donateParams);
-    requestHttp.post(donorsChooseDonationBaseURL, donateParams, function(err, response, body) {
-      console.log('debug', 'Donation submission return:', body.trim())
+    requestHttp.post(DONATE_API_URL, donateParams, function(err, response, body) {
       if (err) {
-        callback('Was unable to retrieve a response from the submit donation endpoint of DonorsChoose.org, user mobile: ' + donorPhoneNumber + 'error: ' + err);
+        callback('Was unable to retrieve a response from the submit donation endpoint of DonorsChoose.org, user mobile: ' + donorPhoneNumber + 'error: ' + err, userCSVRow);
         console.log('Was unable to retrieve a response from the submit donation endpoint of DonorsChoose.org, user mobile: ' + donorPhoneNumber + 'error: ' + err);
       }
       else if (response && response.statusCode != 200) {
         callback('Failed to submit donation to DonorsChoose.org for user mobile: ' 
-          + donorPhone + '. Status code: ' + response.statusCode + ' | Response: ' + response);
+          + donorPhone + '. Status code: ' + response.statusCode + ' | Response: ' + response, userCSVRow);
         console.log('Failed to submit donation to DonorsChoose.org for user mobile: ' 
           + donorPhone + '. Status code: ' + response.statusCode + ' | Response: ' + response);
       }
@@ -246,32 +253,18 @@ var submitDonation = function(userPhone, userEmail, userName, proposalId, callba
             console.log('Donation to proposal ' + proposalId + ' for user mobile: ' 
               + donorPhone + ' was NOT successful. Body:' + JSON.stringify(jsonBody))
             callback('Donation to proposal ' + proposalId + ' for user mobile: ' 
-              + donorPhone + ' was NOT successful. Body:' + JSON.stringify(jsonBody));
+              + donorPhone + ' was NOT successful. Body:' + JSON.stringify(jsonBody), userCSVRow);
           }
         }
         catch (e) {
           console.log('Failed trying to parse the donation response from DonorsChoose.org. User mobile: ' 
             + donorPhone + 'Error: ' + e.message);
           callback('Failed trying to parse the donation response from DonorsChoose.org. User mobile: ' 
-            + donorPhone + 'Error: ' + e.message);
+            + donorPhone + 'Error: ' + e.message, userCSVRow);
         }
       }
     })
   }
 };
-
-/**
- * The following two functions are for handling Mongoose Promise chain errors.
- */
-function promiseErrorCallback(message, userPhone) {
-  return onPromiseErrorCallback.bind({message: message, userPhone: userPhone});
-}
-
-function onPromiseErrorCallback(err) {
-  if (err) {
-    logger.error(this.message + '\n', err.stack);
-    sendSMS(this.userPhone, config.error_start_again)
-  }
-}
 
 readAndParseFile().then(parseFile).then(makeDonations);
