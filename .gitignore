@@ -1,0 +1,5 @@
+MOCK_DATA.csv
+usersWhoseTransactionsErrored.csv
+SS2015_error_donations.csv
+node_modules
+.DS_Store
